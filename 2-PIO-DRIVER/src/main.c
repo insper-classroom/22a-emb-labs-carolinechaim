@@ -134,23 +134,20 @@ const uint32_t ul_default_level,
 const uint32_t ul_multidrive_enable,
 const uint32_t ul_pull_up_enable)
 {
-	
 
-/* Enable multi-drive if necessary */
 if (ul_multidrive_enable) {
 	p_pio->PIO_MDER = ul_mask;
 	} else {
 	p_pio->PIO_MDDR = ul_mask;
 }
 
-/* Set default value */
 if (ul_default_level) {
-	p_pio->PIO_SODR = ul_mask;
+	_pio_set(p_pio, ul_mask);
 	} else {
-	p_pio->PIO_CODR = ul_mask;
+	_pio_clear(p_pio,ul_mask);
 }
 
-/* Configure pin(s) as output(s) */
+
 p_pio->PIO_OER = ul_mask;
 p_pio->PIO_PER = ul_mask;
 }
@@ -178,9 +175,9 @@ void init(void){
 	
 	//Inicializa PIO como saída
 	pio_set_output(LED_PIO, LED_PIO_IDX_MASK, 0, 0, 0);
-	pio_set_output(LED_PIO_1, LED_PIO_IDX_MASK_1, 0, 0, 0);
-	pio_set_output(LED_PIO_2, LED_PIO_IDX_MASK_2, 0, 0, 0);
-	pio_set_output(LED_PIO_3, LED_PIO_IDX_MASK_3, 0, 0, 0);
+	_pio_set_output(LED_PIO_1, LED_PIO_IDX_MASK_1, 0, 0, 0);
+	_pio_set_output(LED_PIO_2, LED_PIO_IDX_MASK_2, 0, 0, 0);
+	_pio_set_output(LED_PIO_3, LED_PIO_IDX_MASK_3, 0, 0, 0);
 
 	
 	//Inicializa PIO como entrada
