@@ -83,6 +83,7 @@ volatile char flag_rtc_alarm = 0;
 void LED_init(int estado);
 void pin_toggle(Pio *pio, uint32_t mask);
 void pisca_led(int n, int t);
+void gfx_mono_draw_string(const char *str, const gfx_coord_t x, const gfx_coord_t y, const struct font *font);
 
 void TC_init(Tc * TC, int ID_TC, int TC_CHANNEL, int freq);
 
@@ -290,6 +291,8 @@ int main (void)
 	/* Initialize the SAM system */
 	sysclk_init();
 	board_init();
+	char str[25];
+	gfx_mono_ssd1306_init();
 
 	/* Disable the watchdog */
 	WDT->WDT_MR = WDT_MR_WDDIS;
@@ -333,6 +336,10 @@ int main (void)
 	      pisca_led(5, 200);
 	      flag_rtc_alarm = 0;
       }
+			rtc_get_date(RTC, &current_year, &current_month, &current_day, &current_week);
+			rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
+			sprintf(str, "%02d:%02d:%02d", current_hour, current_min, current_sec);
+			gfx_mono_draw_string(str, 0, 0, &sysfont);
             pmc_sleep(SAM_PM_SMODE_SLEEP_WFI);
 	}
 }
