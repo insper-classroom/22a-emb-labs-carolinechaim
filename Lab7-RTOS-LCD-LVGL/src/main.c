@@ -10,6 +10,8 @@
 
 LV_FONT_DECLARE(dseg70);
 LV_FONT_DECLARE(dseg50);
+LV_FONT_DECLARE(dseg40);
+LV_FONT_DECLARE(dseg30);
 // global
 static  lv_obj_t * labelBtn1;
 static  lv_obj_t * labelMenu;
@@ -17,6 +19,31 @@ static  lv_obj_t * labelClk;
 static  lv_obj_t * labelbtnUp;
 static  lv_obj_t * labelbtnDown;
 static lv_obj_t * labelFloor;
+static lv_obj_t * labelSetValue;
+static lv_obj_t * labelClock;
+
+
+typedef struct  {
+	uint32_t year;
+	uint32_t month;
+	uint32_t day;
+	uint32_t week;
+	uint32_t hour;
+	uint32_t minute;
+	uint32_t second;
+} calendar;
+
+calendar calendario = {2022, 5, 16, 20, 16, 8, 10};
+
+uint32_t current_hour, current_min, current_sec;
+uint32_t current_year, current_month, current_day, current_week;
+
+volatile char flag_rtc = 0;
+
+QueueHandle_t xQueueRtc;
+SemaphoreHandle_t xSemaphoreRtc;
+
+
 /*************************************************s***********************/
 /* LCD / LVGL                                                           */
 /************************************************************************/
@@ -38,6 +65,10 @@ static lv_indev_drv_t indev_drv;
 
 #define TASK_LCD_STACK_SIZE                (1024*6/sizeof(portSTACK_TYPE))
 #define TASK_LCD_STACK_PRIORITY            (tskIDLE_PRIORITY)
+
+#define TASK_RTC_SIZE                (1024*6/sizeof(portSTACK_TYPE))
+#define TASK_RTC_PRIORITY            (tskIDLE_PRIORITY)
+
 
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask,  signed char *pcTaskName);
 extern void vApplicationIdleHook(void);
@@ -96,29 +127,92 @@ static void clk_handler(lv_event_t * e) {
 }
 
 static void up_handler(lv_event_t * e) {
-	lv_event_code_t code = lv_event_get_code(e);
-
-	if(code == LV_EVENT_CLICKED) {
-		LV_LOG_USER("Clicked");
-	}
-	else if(code == LV_EVENT_VALUE_CHANGED) {
-		LV_LOG_USER("Toggled");
-	}
+    lv_event_code_t code = lv_event_get_code(e);
+    char *c;
+    int temp;
+    if(code == LV_EVENT_CLICKED) {
+	    c = lv_label_get_text(labelSetValue);
+	    temp = atoi(c);
+	    lv_label_set_text_fmt(labelSetValue, "%02d", temp + 1);
+    }
 }
 
 static void down_handler(lv_event_t * e) {
-	lv_event_code_t code = lv_event_get_code(e);
+    lv_event_code_t code = lv_event_get_code(e);
+    char *c;
+    int temp;
+    if(code == LV_EVENT_CLICKED) {
+	    c = lv_label_get_text(labelSetValue);
+	    temp = atoi(c);
+	    lv_label_set_text_fmt(labelSetValue, "%02d", temp - 1);
+    }
+}
 
-	if(code == LV_EVENT_CLICKED) {
-		LV_LOG_USER("Clicked");
+void RTC_Handler(void) {
+	uint32_t ul_status = rtc_get_status(RTC);
+	
+	/* seccond tick */
+	if ((ul_status & RTC_SR_SEC) == RTC_SR_SEC) {
+		// o c?digo para irq de segundo vem aqui
+		flag_rtc = 1;
+		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+		xSemaphoreGiveFromISR(xSemaphoreRtc, &xHigherPriorityTaskWoken);
+		xQueueSendFromISR(xQueueRtc, (void *)&flag_rtc, &xHigherPriorityTaskWoken);
+		
 	}
-	else if(code == LV_EVENT_VALUE_CHANGED) {
-		LV_LOG_USER("Toggled");
+	
+	/* Time or date alarm */
+	if ((ul_status & RTC_SR_ALARM) == RTC_SR_ALARM) {
+		// o c?digo para irq de alame vem aqui
 	}
+
+	rtc_clear_status(RTC, RTC_SCCR_SECCLR);
+	rtc_clear_status(RTC, RTC_SCCR_ALRCLR);
+	rtc_clear_status(RTC, RTC_SCCR_ACKCLR);
+	rtc_clear_status(RTC, RTC_SCCR_TIMCLR);
+	rtc_clear_status(RTC, RTC_SCCR_CALCLR);
+	rtc_clear_status(RTC, RTC_SCCR_TDERRCLR);
 }
 
 
+void RTC_init(Rtc *rtc, uint32_t id_rtc, calendar t, uint32_t irq_type) {
+	/* Configura o PMC */
+	pmc_enable_periph_clk(ID_RTC);
 
+	/* Default RTC configuration, 24-hour mode */
+	rtc_set_hour_mode(rtc, 0);
+
+	/* Configura data e hora manualmente */
+	rtc_set_date(rtc, t.year, t.month, t.day, t.week);
+	rtc_set_time(rtc, t.hour, t.minute, t.second);
+
+	/* Configure RTC interrupts */
+	NVIC_DisableIRQ(id_rtc);
+	NVIC_ClearPendingIRQ(id_rtc);
+	NVIC_SetPriority(id_rtc, 4);
+	NVIC_EnableIRQ(id_rtc);
+
+	/* Ativa interrupcao via alarme */
+	rtc_enable_interrupt(rtc,  irq_type);
+}
+
+void task_rtc() {
+	RTC_init(RTC, ID_RTC, calendario, RTC_IER_SECEN);
+	int32_t delayticks = 0;
+	
+	for(;;) {
+		if (xQueueReceive(xQueueRtc, &delayticks, (TickType_t) 0)){
+			rtc_get_time(RTC, &current_hour, &current_min, &current_sec);
+			char *c;
+			c = lv_label_get_text(labelClock);
+			lv_label_set_text_fmt(labelClock, "%02d:%02d", current_hour, current_min);
+			delay_ms(500);
+			lv_label_set_text_fmt(labelClock, "%02d %02d", current_hour, current_min);
+			delay_ms(500);
+			lv_label_set_text_fmt(labelClock, "%02d:%02d", current_hour, current_min);
+		}
+	}
+}
 
 void lv_termostato(void) {
 	
@@ -204,13 +298,33 @@ void lv_termostato(void) {
 	lv_label_set_text(labelbtnDown, LV_SYMBOL_DOWN" ]");
 	lv_obj_center(labelbtnDown);	
 	
+	//FLOOR
 	
     labelFloor = lv_label_create(lv_scr_act());
-    lv_obj_align(labelFloor, LV_ALIGN_LEFT_MID, 35 , -45);
+    lv_obj_align(labelFloor, LV_ALIGN_LEFT_MID, 35 , -25);
     lv_obj_set_style_text_font(labelFloor, &dseg70, LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(labelFloor, lv_color_white(), LV_STATE_DEFAULT);
     lv_label_set_text_fmt(labelFloor, "%02d", 23);	
-	}
+	
+	
+	//SETVALUE
+	
+	labelSetValue = lv_label_create(lv_scr_act());
+	lv_obj_align_to(labelSetValue, labelFloor, LV_ALIGN_OUT_RIGHT_TOP, 50, 0);
+	lv_obj_set_style_text_font(labelSetValue, &dseg50, LV_STATE_DEFAULT);
+	lv_obj_set_style_text_color(labelSetValue, lv_color_white(), LV_STATE_DEFAULT);
+	lv_label_set_text_fmt(labelSetValue, "%02d", 23);
+	
+	
+	//CLOCK
+	
+	labelClock = lv_label_create(lv_scr_act());
+	lv_obj_align_to(labelClock, labelSetValue, LV_ALIGN_TOP_MID, -40, -50);
+	lv_obj_set_style_text_font(labelClock, &dseg30, LV_STATE_DEFAULT);
+	lv_obj_set_style_text_color(labelClock, lv_color_white(), LV_STATE_DEFAULT);
+	
+}
+
 
 /************************************************************************/
 /* TASKS                                                                */
@@ -319,10 +433,23 @@ int main(void) {
 	configure_lcd();
 	configure_touch();
 	configure_lvgl();
-
+	
+	xSemaphoreRtc = xSemaphoreCreateBinary();
+	if (xSemaphoreRtc == NULL)
+	printf("Criação do semáforo falhou");
+	
+	xQueueRtc = xQueueCreate(32, sizeof(uint32_t));
+	if (xQueueRtc == NULL)
+	printf("Criação da Queue falhou");
+	
+	
 	/* Create task to control oled */
 	if (xTaskCreate(task_lcd, "LCD", TASK_LCD_STACK_SIZE, NULL, TASK_LCD_STACK_PRIORITY, NULL) != pdPASS) {
 		printf("Failed to create lcd task\r\n");
+	}
+	
+	if (xTaskCreate(task_rtc, "RTC", TASK_RTC_SIZE, NULL, TASK_RTC_PRIORITY, NULL) != pdPASS) {
+		printf("Failed to create RTC task\r\n");
 	}
 	
 	/* Start the scheduler. */
