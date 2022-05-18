@@ -243,7 +243,6 @@ int main (void)
 		if (tempo != 0) {
 			double  tempo_real = (float) tempo/freq;
 			float distancia_cm = (340*tempo_real*100.0)/2.0;
-			
 			sprintf(str, "%6.2lf", distancia_cm);
 			gfx_mono_draw_string(str, 0,16, &sysfont);
 			tempo = 0;				
